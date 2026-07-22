@@ -317,6 +317,14 @@ th:nth-child(2){text-align:left;}
   <button class="nav-btn" onclick="goNav('mappe')">🗺️ Mappe</button>
   <button class="nav-btn" onclick="goNav('tornei')">📅 Tornei</button>
 </nav>
+<div style="text-align:center;padding:0 1rem 1rem;position:relative;z-index:10;border-bottom:1px solid rgba(42,42,69,.4)">
+  <div style="display:flex;justify-content:center;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.8rem">
+    <label style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em">Tipo match:</label>
+    <button class="nav-btn" id="mt-tutte" style="padding:.35rem .8rem;font-size:.7rem" onclick="setMatchTypeFilter('TUTTE')">📊 Tutte le Stats</button>
+    <button class="nav-btn" style="padding:.35rem .8rem;font-size:.7rem" onclick="setMatchTypeFilter('LOCALE')">🖥️ Solo Locale</button>
+    <button class="nav-btn" style="padding:.35rem .8rem;font-size:.7rem" onclick="setMatchTypeFilter('LAN')">🌐 Solo LAN</button>
+  </div>
+</div>
 <main>
 
 <!-- CLASSIFICA -->
@@ -348,12 +356,6 @@ th:nth-child(2){text-align:left;}
     <label>Torneo:</label>
     <select id="torn-sel" onchange="renderClass()"><option value="">Tutti</option></select>
   </div>
-<label>Tipo:</label>
-<select id="tipo-sel" onchange="renderClass()">
-  <option value="">Tutte le stats</option>
-  <option value="LOCALE">Locale</option>
-  <option value="LAN">LAN</option>
-</select>
   <div class="card"><div class="tw" style="max-height:70vh;overflow-y:auto;overflow-x:auto;"><table>
     <thead><tr>
       <th>#</th><th>Pilota</th>
@@ -397,11 +399,6 @@ th:nth-child(2){text-align:left;}
     <select id="p-torneo-sel" onchange="renderPlayer()" style="font-size:.78rem">
       <option value="">Tutti i tornei</option>
     </select>
-<select id="p-tipo-sel" onchange="renderPlayer()" style="font-size:.78rem">
-  <option value="">Tutti i tipi</option>
-  <option value="LOCALE">Locale</option>
-  <option value="LAN">LAN</option>
-</select>
     <span style="font-size:.72rem;color:var(--muted);font-style:italic">🏆 ELO sempre globale</span>
   </div>
   <div id="pcontent"></div>
@@ -419,11 +416,6 @@ th:nth-child(2){text-align:left;}
     <select id="h2h-torneo-sel" onchange="renderH2H()" style="font-size:.78rem">
       <option value="">Tutti i tornei</option>
     </select>
-<select id="h2h-tipo-sel" onchange="renderH2H()" style="font-size:.78rem">
-  <option value="">Tutti i tipi</option>
-  <option value="LOCALE">Locale</option>
-  <option value="LAN">LAN</option>
-</select>
     <span style="font-size:.75rem;color:var(--muted);margin-left:.4rem">Modalità:</span>
     <label style="display:flex;align-items:center;gap:.35rem;font-size:.8rem;cursor:pointer">
       <input type="radio" name="h2h-mode" value="past" checked onchange="h2hC(1)"> Solo già affrontati
@@ -522,14 +514,6 @@ th:nth-child(2){text-align:left;}
 <!-- MAPPE -->
 <div id="mappe" class="section">
   <div class="sec-title">🗺️ Mappe per Trofeo</div>
-<div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.7rem;padding:.5rem .8rem;background:var(--card2);border-radius:.6rem;border:1px solid var(--border)">
-  <span style="font-size:.75rem;color:var(--muted)">🔍 Filtra mappe per:</span>
-  <select id="map-tipo-sel" onchange="renderMappe()" style="font-size:.78rem">
-    <option value="">Tutte le stats</option>
-    <option value="LOCALE">Locale</option>
-    <option value="LAN">LAN</option>
-  </select>
-</div>
   <div id="mappe-highlights"></div>
   <div id="mappe-content"></div>
 </div>
@@ -545,10 +529,11 @@ th:nth-child(2){text-align:left;}
 // ============================================================
 // STATE
 // ============================================================
-let RACES=[], PLAYERS={}, TORNEO_LINKS={}, getFilteredMapStats()=[], TROPHY_INFO={}, CRON_LABELS={}, TIMELINE_FRAMES=[];
+let RACES=[], PLAYERS={}, TORNEO_LINKS={}, MAP_STATS=[], TROPHY_INFO={}, CRON_LABELS={}, TIMELINE_FRAMES=[];
 let PLAYER_PROFILES={}, CHAR_IMGS={}, VEHICLE_IMGS={};
 let sortField='rk', sortDir=-1;
 let rkFrame=0, rkPlaying=false, rkTimer=null;
+let matchTypeFilter='TUTTE'; // TUTTE, LOCALE, LAN
 const playerColors={};
 const RK_COLORS=['#ffd900','#00e676','#4da6ff','#ff6d00','#e8001c','#b040ff','#00d4d4','#ff69b4','#a8ff3e','#ffaa00','#60efff','#ff5555','#c0c0c0','#cd7f32','#7fff7f','#ff8c00','#00bfff','#ff1493','#7cfc00','#da70d6'];
 const TROPHY_ORDER=['TROFEO FUNGO','TROFEO GUSCIO','TROFEO BANANA','TROFEO FIORE','TROFEO STELLA','TROFEO FOGLIA','TROFEO FULMINE','TROFEO SPECIALE'];
@@ -583,59 +568,45 @@ async function fetchAndLoad(){
 
 
 
-for(let i=1;i<rows.length;i++){
+function parseRows(rows){
+  const racesDict={},torneo_links={},eloTL={},cronLabels={},mapInfo={},trophyInfo={},playerProfiles={},torneoStatsMap={};
+  const bad=new Set(['','MAPPA 1','MAPPA 2','MAPPA 3','MAPPA 4','MAPPA 5','MAPPA 6']);
+  for(let i=1;i<rows.length;i++){
     const r=rows[i];
     const s=v=>{const x=String(v==null?'':v).trim().replace(/\s+/g,' ');return(x===''||x==='N/D'||x==='#VALUE!')?'':x;};
     const n=v=>{const x=parseInt(v);return isNaN(x)?0:x;};
     const fl=v=>{const x=parseFloat(String(v==null?'':v).replace(',','.'));return isNaN(x)?0:x;};
-    
-    // NUOVI INDICI BASATI SUL TUO NUOVO FOGLIO (0=A, 1=B, 2=C, ecc...)
-    const conc = s(r[0]); if(!conc) continue;
-    const posC = n(r[1]);
-    const mappa = s(r[2]);
-    const anno = s(r[3]);
-    const elo = fl(r[4]);
-    const diff = s(r[5]);
-    const tornN = s(r[6]);
-    const tipo = s(r[7]);        // H: LOCALE o LAN
-    const codMatch = s(r[8]);    // I: Codice univoco match
-    const cronRaw = r[9];        // J: Codice cronologia
-    const cron = (cronRaw!==''&&cronRaw!=null&&String(cronRaw).trim()!=='')?n(cronRaw):null;
-    const match = s(r[10]);      // K: Nome match
-
-    // ATTENZIONE: ho lasciato questi con i vecchi indici. 
-    // Assicurati che corrispondano alle tue colonne attuali nel foglio Google!
-    const partita = n(r[11]); 
-    const tornR=s(r[17]),link=s(r[18]),annoR=s(r[19]);
-    const mapU=s(r[20]),mapTrofeo=s(r[21]);
-    const pilota=s(r[23]),personaggio=s(r[24]),veicolo=s(r[25]),mappa1=s(r[26]),mappa2=s(r[27]),derapata=s(r[28]),foto_profilo=s(r[29]);
-    
+    const conc=s(r[0]); if(!conc) continue;
+    const posC=n(r[1]);
+    const mappa=s(r[2]),anno=s(r[3]),elo=fl(r[4]),diff=s(r[5]);
+    const tornN=s(r[6]);
+    const tipoMatch=s(r[7]); // NUOVO: LOCALE o LAN
+    const matchId=s(r[8]); // NUOVO: codice univoco del match
+    const cronRaw=r[9]; const cron=(cronRaw!==''&&cronRaw!=null&&String(cronRaw).trim()!=='')?n(cronRaw):null;
+    const match=s(r[10]);
+    // Profile cols: rimangono uguali ma con indici aggiornati
+    // Assumendo che i dati dei profili iniziano dove prima (dopo le colonne nuove aggiunte)
+    // Per ora usiamo conc come pilota principale
+    const pilota=conc;
     if(!conc||!mappa) continue;
-    if(tornR&&link) torneo_links[tornR]={link, anno: annoR||null};
     if(cron!=null&&elo>0){
       if(!eloTL[conc])eloTL[conc]={};
       if(!eloTL[conc][cron])eloTL[conc][cron]={elo,match,torneo:tornN,anno};
     }
     if(cron!=null&&match) cronLabels[cron]=match;
-    if(mapU&&!bad.has(mapU)&&!mapInfo[mapU]) mapInfo[mapU]={trofeo:mapTrofeo,foto:''};
-    
-    const pk=pilota||conc;
-    if(pk&&!playerProfiles[pk]) playerProfiles[pk]={personaggio,veicolo,mappa1,mappa2,derapata,foto_profilo};
-    else if(pk&&foto_profilo&&!playerProfiles[pk].foto_profilo) playerProfiles[pk].foto_profilo=foto_profilo;
-    
+    // torneoStats per player
     if(tornN){
       if(!torneoStatsMap[conc]) torneoStatsMap[conc]={};
       if(!torneoStatsMap[conc][tornN]) torneoStatsMap[conc][tornN]={gare:0,wins:0,posSum:0};
     }
-
-    // Costruzione Match usando il nuovo CODICE UNIVOCO! (Molto più sicuro)
-    const key = codMatch ? codMatch : [tornN,anno,mappa,conc].join('||');
-    if(!racesDict[key]) {
-      racesDict[key]={mappa,anno,partita,diff,torneo:tornN,cron,nome_match:match,tipo:tipo,players:{}};
-    }
-    // Aggiungo il pilota al match
-    racesDict[key].players[conc] = posC;
+    // Build race — key uses sorted players+positions to deduplicate robustly
+    const players={[conc]:posC};
+    const playersKey=Object.entries(players).sort((a,b)=>a[0]<b[0]?-1:1).map(([n,p])=>n+':'+p).join('|');
+    const key=[tornN,anno,mappa,playersKey].join('||');
+    if(!racesDict[key]) racesDict[key]={mappa,anno,partita,diff,torneo:tornN,cron,nome_match:match,tipo_match:tipoMatch,match_id:matchId,players:{}};
+    for(const[pn,pp]of Object.entries(players)) if(!(pn in racesDict[key].players)) racesDict[key].players[pn]=pp;
   }
+  const races=Object.values(racesDict);
   const pstats={};
   for(const race of races){
     for(const[pn,pp]of Object.entries(race.players)){
@@ -678,7 +649,7 @@ for(let i=1;i<rows.length;i++){
     for(const[pn,tl]of Object.entries(eloTL)){if(tl[cron]){curElo[pn]=tl[cron].elo;annoC=tl[cron].anno;torneoC=tl[cron].torneo;}}
     return{cron,label:cronLabels[cron],anno:annoC,torneo:torneoC,elo:{...curElo}};
   });
-  return{races,players,torneo_links,getFilteredMapStats():Object.values(mapStatsD),trophy_info:trophyInfo,
+  return{races,players,torneo_links,map_stats:Object.values(mapStatsD),trophy_info:trophyInfo,
     cron_labels:cronLabels,timeline_frames,player_profiles:playerProfiles};
 }
 
@@ -692,7 +663,7 @@ function loadFromData(data){
     PLAYERS[p.name]=p;
   }
   TORNEO_LINKS=data.torneo_links||{};
-  getFilteredMapStats()=data.getFilteredMapStats()||[];
+  MAP_STATS=data.map_stats||[];
   TROPHY_INFO=data.trophy_info||{};
   CRON_LABELS=data.cron_labels||{};
   TIMELINE_FRAMES=data.timeline_frames||[];
@@ -700,7 +671,7 @@ function loadFromData(data){
   // Inject embedded images
   CHAR_IMGS=EMB_IMGS.chars||{};
   VEHICLE_IMGS=EMB_IMGS.vehicles||{};
-  for(const m of getFilteredMapStats()){ if(EMB_IMGS.maps&&EMB_IMGS.maps[m.name]) m.foto=EMB_IMGS.maps[m.name]; }
+  for(const m of MAP_STATS){ if(EMB_IMGS.maps&&EMB_IMGS.maps[m.name]) m.foto=EMB_IMGS.maps[m.name]; }
   for(const[t,v] of Object.entries(TROPHY_INFO)){ if(EMB_IMGS.trophies&&EMB_IMGS.trophies[t]) v.foto=EMB_IMGS.trophies[t]; }
   // reset colors
   for(const k of Object.keys(playerColors)) delete playerColors[k];
@@ -717,8 +688,13 @@ function loadFromData(data){
 // ============================================================
 // FILTERS
 // ============================================================
+function getFilteredRaces(){
+  if(matchTypeFilter==='TUTTE') return RACES;
+  return RACES.filter(r=>r.tipo_match===matchTypeFilter);
+}
+
 function torneiPerAnno(anno){
-  const src=RACES.filter(r=>!anno||r.anno==anno);
+  const src=getFilteredRaces().filter(r=>!anno||r.anno==anno);
   return [...new Set(src.map(r=>r.torneo).filter(Boolean))].sort();
 }
 
@@ -1090,18 +1066,10 @@ function thSort(f){
   renderClass();
 }
 function getFilteredStats(){
-  const aF=document.getElementById('anno-sel').value;
-  const tF=document.getElementById('torn-sel').value;
-  const tpF=document.getElementById('tipo-sel')?.value || ''; // NUOVO
-
-  if(!aF&&!tF&&!tpF)return PLAYERS;
-  
-  const fr=RACES.filter(r=>
-    (!aF||r.anno==aF) && 
-    (!tF||r.torneo===tF) &&
-    (!tpF||r.tipo===tpF) // NUOVO
-  );
-  
+  const aF=document.getElementById('anno-sel').value,tF=document.getElementById('torn-sel').value;
+  const allRaces=getFilteredRaces();
+  if(!aF&&!tF)return PLAYERS;
+  const fr=allRaces.filter(r=>(!aF||r.anno==aF)&&(!tF||r.torneo===tF));
   const pf={};
   for(const race of fr){for(const[pn,pp]of Object.entries(race.players)){
     if(!pf[pn])pf[pn]={name:pn,gare:0,wins:0,posSum:0,lastRk:PLAYERS[pn]?.lastRk||1000};
@@ -1174,18 +1142,15 @@ function renderPlayer(){
   if(!name){el.innerHTML='';return;}
   const p=PLAYERS[name]; if(!p) return;
 
-// --- Filtered races for this player ---
+  // --- Filtered races for this player ---
   const aF=document.getElementById('p-anno-sel')?.value||'';
   const tF=document.getElementById('p-torneo-sel')?.value||'';
-  const tpF=document.getElementById('p-tipo-sel')?.value||''; // NUOVO
-  const isFiltered=!!(aF||tF||tpF);
-  
-  const filtRaces=RACES.filter(r=>
+  const isFiltered=!!(aF||tF);
+  const filtRaces=getFilteredRaces().filter(r=>
     (name in r.players)&&
     (!aF||r.anno==aF)&&
-    (!tF||r.torneo===tF)&&
-    (!tpF||r.tipo===tpF) // NUOVO
-  )
+    (!tF||r.torneo===tF)
+  );
 
   // Compute filtered stats
   let fGare=0,fWins=0,fPosSum=0;
@@ -1287,7 +1252,7 @@ function renderPlayer(){
   }).join('');}
 
   // Player maps stats filtered
-  const playerMaps=getFilteredMapStats().map(m=>{
+  const playerMaps=MAP_STATS.map(m=>{
     const r=fMapResults[m.name]; if(!r||!r.gare) return null;
     return {name:m.name,trofeo:m.trofeo,gare:r.gare,wins:r.wins,avg:(r.posSum/r.gare).toFixed(2)};
   }).filter(Boolean).sort((a,b)=>b.gare-a.gare);
@@ -1316,7 +1281,7 @@ function renderPlayer(){
   }).join('');}
 
   const filterNote=isFiltered?`<div style="font-size:.75rem;color:var(--yellow);margin-bottom:.8rem;padding:.4rem .8rem;background:rgba(255,217,0,.07);border-radius:.5rem;border:1px solid rgba(255,217,0,.2)">
-    📅 Statistiche filtrate${aF?' · Anno: '+aF:''}${tF?' · Torneo: '+tF:''}${tpF?' · Tipo: '+tpF:''} &nbsp;—&nbsp; ELO sempre globale
+    📅 Statistiche filtrate${aF?' · Anno: '+aF:''}${tF?' · Torneo: '+tF:''} &nbsp;—&nbsp; ELO sempre globale
   </div>`:'';
 
   const fotoUrl=(prof.foto_profilo||'').trim();
@@ -1433,12 +1398,7 @@ function showAllPMaps(){
 function h2hFilteredRaces(){
   const aF=document.getElementById('h2h-anno-sel')?.value||'';
   const tF=document.getElementById('h2h-torneo-sel')?.value||'';
-  const tpF=document.getElementById('h2h-tipo-sel')?.value||''; // NUOVO
-  return RACES.filter(r=>
-    (!aF||r.anno==aF)&&
-    (!tF||r.torneo===tF)&&
-    (!tpF||r.tipo===tpF) // NUOVO
-  );
+  return RACES.filter(r=>(!aF||r.anno==aF)&&(!tF||r.torneo===tF));
 }
 function commonRaces(sel){return h2hFilteredRaces().filter(r=>sel.every(p=>p in r.players));}
 function oppList(sel){
@@ -2096,27 +2056,6 @@ function rkSeek(v){
 // ============================================================
 // MAPPE (grouped by trophy)
 // ============================================================
-function getFilteredMapStats() {
-  const tpF = document.getElementById('map-tipo-sel')?.value || '';
-  const fr = RACES.filter(r => !tpF || r.tipo === tpF);
-  
-  const mapStatsD = {};
-  for(const race of fr){
-    const m = race.mappa;
-    if(!mapStatsD[m]){
-      const info = getFilteredMapStats().find(x => x.name === m) || {trofeo:'ALTRO', foto:''};
-      mapStatsD[m] = {name:m, times_played:0, results:{}, trofeo:info.trofeo, foto:info.foto};
-    }
-    mapStatsD[m].times_played++;
-    for(const[pn,pp] of Object.entries(race.players)){
-      if(!mapStatsD[m].results[pn]) mapStatsD[m].results[pn] = {gare:0, wins:0, posSum:0};
-      mapStatsD[m].results[pn].gare++;
-      mapStatsD[m].results[pn].posSum += pp;
-      if(pp === 1) mapStatsD[m].results[pn].wins++;
-    }
-  }
-  return Object.values(mapStatsD);
-}
 function mapGlobalAvgPos(m){
   // Average position across ALL races on this map, across ALL players
   let posSum=0, count=0;
@@ -2129,7 +2068,7 @@ function mapGlobalAvgPos(m){
 function renderMapHighlights(){
   const el=document.getElementById('mappe-highlights');
   if(!el) return;
-  const validMaps=getFilteredMapStats().filter(m=>m.trofeo&&m.trofeo!=='ALTRO'&&m.times_played>0);
+  const validMaps=MAP_STATS.filter(m=>m.trofeo&&m.trofeo!=='ALTRO'&&m.times_played>0);
   if(validMaps.length<2){el.innerHTML='';return;}
   const sorted=[...validMaps].sort((a,b)=>b.times_played-a.times_played);
   const top5=sorted.slice(0,5);
@@ -2175,7 +2114,7 @@ function renderMaps(){
   renderMapHighlights();
   const el=document.getElementById('mappe-content'); el.innerHTML='';
   const byTrophy={};
-  for(const m of getFilteredMapStats()){
+  for(const m of MAP_STATS){
     const t=m.trofeo||'ALTRO';
     if(!byTrophy[t])byTrophy[t]=[];
     byTrophy[t].push(m);
@@ -2294,7 +2233,7 @@ function buildMiniTable(results, initSort){
 }
 
 function openMapModal(mapName){
-  const m=getFilteredMapStats().find(x=>x.name===mapName); if(!m) return;
+  const m=MAP_STATS.find(x=>x.name===mapName); if(!m) return;
   const box=document.getElementById('map-modal-box');
   const avgPos=mapGlobalAvgPos(m);
   const results=Object.entries(m.results||{}).map(([n,r])=>({name:n,...r,avg:r.posSum/r.gare}));
@@ -2325,7 +2264,7 @@ function openMapModal(mapName){
 
 // ---- TROPHY MODAL ----
 function openTrophyModal(trophy){
-  const maps=(getFilteredMapStats()||[]).filter(m=>m.trofeo===trophy);
+  const maps=(MAP_STATS||[]).filter(m=>m.trofeo===trophy);
   if(!maps.length) return;
   const box=document.getElementById('map-modal-box');
   const tInfo=TROPHY_INFO[trophy]||{foto:''};
@@ -2474,6 +2413,25 @@ function renderTornei(){
     el.appendChild(hdr);
     el.appendChild(body);
   });
+}
+
+// ============================================================
+// MATCH TYPE FILTER
+// ============================================================
+function setMatchTypeFilter(type){
+  matchTypeFilter=type;
+  // Update button states
+  document.getElementById('mt-tutte').classList.toggle('active',type==='TUTTE');
+  document.querySelectorAll('[onclick*="LOCALE"]')[0]?.parentElement.classList.toggle('active',type==='LOCALE');
+  document.querySelectorAll('[onclick*="LAN"]')[0]?.parentElement.classList.toggle('active',type==='LAN');
+  
+  // Re-render all sections
+  const activeSection=document.querySelector('.section.active');
+  if(activeSection.id==='classifica') renderClass();
+  else if(activeSection.id==='giocatore') renderGiocatore();
+  else if(activeSection.id==='h2h') renderH2H();
+  else if(activeSection.id==='mappe') renderMaps();
+  else if(activeSection.id==='ranking') rkDraw();
 }
 
 // ============================================================

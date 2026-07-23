@@ -710,7 +710,7 @@ function updateTorneiSel(torneoSelId, anno, currentVal){
 }
 
 function populateFilters(){
-  const anni=[...new Set(RACES.map(r=>r.anno))].sort().reverse();
+  const anni=[...new Set(getFilteredRaces().map(r=>r.anno))].sort().reverse();
   const tornei=torneiPerAnno('');
 
   // Classifica
@@ -1398,7 +1398,7 @@ function showAllPMaps(){
 function h2hFilteredRaces(){
   const aF=document.getElementById('h2h-anno-sel')?.value||'';
   const tF=document.getElementById('h2h-torneo-sel')?.value||'';
-  return RACES.filter(r=>(!aF||r.anno==aF)&&(!tF||r.torneo===tF));
+  return getFilteredRaces().filter(r=>(!aF||r.anno==aF)&&(!tF||r.torneo===tF));
 }
 function commonRaces(sel){return h2hFilteredRaces().filter(r=>sel.every(p=>p in r.players));}
 function oppList(sel){
@@ -1958,11 +1958,40 @@ function rkScheduleNext(){
 // Filtered frames for ranking (set on filter change or init)
 let RK_FILTERED_FRAMES=[];
 
+function getFilteredTimelines(){
+  // Ricalcola TIMELINE_FRAMES basato su filtro matchTypeFilter
+  const filtRaces=getFilteredRaces();
+  const eloTL={};
+  const cronLabels={};
+  // Calcola eloTL da filtered races
+  for(const race of filtRaces){
+    if(!race.cron||!race.nome_match) continue;
+    cronLabels[race.cron]=race.nome_match;
+    // Leggi ELO dal PLAYERS global (che contiene eloTimeline completo)
+  }
+  const allCrons=Object.keys(cronLabels).map(Number).sort((a,b)=>a-b);
+  const curElo={};
+  // Rebuild timeline usando solo i cron che hanno races nel filtro
+  const timeline_frames=allCrons.map(cron=>{
+    let annoC='',torneoC='';
+    // Guarda nei players per trovare ELO a questo cron
+    for(const[pn,player]of Object.entries(PLAYERS)){
+      if(player.eloTimeline){
+        const entry=player.eloTimeline.find(e=>e.cron===cron);
+        if(entry){curElo[pn]=entry.elo;annoC=entry.anno;torneoC=entry.torneo;}
+      }
+    }
+    return{cron,label:cronLabels[cron],anno:annoC,torneo:torneoC,elo:{...curElo}};
+  });
+  return timeline_frames;
+}
+
 function rkGetFilteredFrames(){
   const aF=document.getElementById('rk-anno-sel')?.value||'';
   const tF=document.getElementById('rk-torneo-sel')?.value||'';
-  if(!aF&&!tF) return TIMELINE_FRAMES;
-  return TIMELINE_FRAMES.filter(f=>(!aF||f.anno==aF)&&(!tF||f.torneo===tF));
+  const frames=getFilteredTimelines();
+  if(!aF&&!tF) return frames;
+  return frames.filter(f=>(!aF||f.anno==aF)&&(!tF||f.torneo===tF));
 }
 
 function rkApplyFilter(){
@@ -2056,6 +2085,25 @@ function rkSeek(v){
 // ============================================================
 // MAPPE (grouped by trophy)
 // ============================================================
+function getFilteredMapStats(){
+  const mapStatsD={};
+  const filtRaces=getFilteredRaces();
+  for(const race of filtRaces){
+    const m=race.mappa;
+    if(!mapStatsD[m]){
+      const mapInfo=MAP_STATS.find(ms=>ms.name===m);
+      const info=mapInfo||{trofeo:'ALTRO',foto:''};
+      mapStatsD[m]={name:m,times_played:0,results:{},trofeo:info.trofeo,foto:info.foto};
+    }
+    mapStatsD[m].times_played++;
+    for(const[pn,pp]of Object.entries(race.players)){
+      if(!mapStatsD[m].results[pn])mapStatsD[m].results[pn]={gare:0,wins:0,posSum:0};
+      mapStatsD[m].results[pn].gare++;mapStatsD[m].results[pn].posSum+=pp;if(pp===1)mapStatsD[m].results[pn].wins++;
+    }
+  }
+  return Object.values(mapStatsD);
+}
+
 function mapGlobalAvgPos(m){
   // Average position across ALL races on this map, across ALL players
   let posSum=0, count=0;
@@ -2068,7 +2116,8 @@ function mapGlobalAvgPos(m){
 function renderMapHighlights(){
   const el=document.getElementById('mappe-highlights');
   if(!el) return;
-  const validMaps=MAP_STATS.filter(m=>m.trofeo&&m.trofeo!=='ALTRO'&&m.times_played>0);
+  const allMaps=getFilteredMapStats();
+  const validMaps=allMaps.filter(m=>m.trofeo&&m.trofeo!=='ALTRO'&&m.times_played>0);
   if(validMaps.length<2){el.innerHTML='';return;}
   const sorted=[...validMaps].sort((a,b)=>b.times_played-a.times_played);
   const top5=sorted.slice(0,5);
@@ -2113,8 +2162,9 @@ function renderMapHighlights(){
 function renderMaps(){
   renderMapHighlights();
   const el=document.getElementById('mappe-content'); el.innerHTML='';
+  const allMaps=getFilteredMapStats();
   const byTrophy={};
-  for(const m of MAP_STATS){
+  for(const m of allMaps){
     const t=m.trofeo||'ALTRO';
     if(!byTrophy[t])byTrophy[t]=[];
     byTrophy[t].push(m);

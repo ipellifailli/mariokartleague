@@ -571,40 +571,86 @@ async function fetchAndLoad(){
 function parseRows(rows){
   const racesDict={},torneo_links={},eloTL={},cronLabels={},mapInfo={},trophyInfo={},playerProfiles={},torneoStatsMap={};
   const bad=new Set(['','MAPPA 1','MAPPA 2','MAPPA 3','MAPPA 4','MAPPA 5','MAPPA 6']);
+  
+  // Funzioni helper
+  const s=v=>{const x=String(v==null?'':v).trim().replace(/\s+/g,' ');return(x===''||x==='N/D'||x==='#VALUE!')?'':x;};
+  const n=v=>{const x=parseInt(v);return isNaN(x)?0:x;};
+  const fl=v=>{const x=parseFloat(String(v==null?'':v).replace(',','.'));return isNaN(x)?0:x;};
+  
+  // First pass: read all rows and collect match data
+  const matchData={}; // match_id -> {players, mappa, anno, torneo, cron, nome_match, tipo_match, diff, partita}
+  
   for(let i=1;i<rows.length;i++){
     const r=rows[i];
-    const s=v=>{const x=String(v==null?'':v).trim().replace(/\s+/g,' ');return(x===''||x==='N/D'||x==='#VALUE!')?'':x;};
-    const n=v=>{const x=parseInt(v);return isNaN(x)?0:x;};
-    const fl=v=>{const x=parseFloat(String(v==null?'':v).replace(',','.'));return isNaN(x)?0:x;};
-    const conc=s(r[0]); if(!conc) continue;
-    const posC=n(r[1]);
-    const mappa=s(r[2]),anno=s(r[3]),elo=fl(r[4]),diff=s(r[5]);
-    const tornN=s(r[6]);
-    const tipoMatch=s(r[7]); // NUOVO: LOCALE o LAN
-    const matchId=s(r[8]); // NUOVO: codice univoco del match
-    const cronRaw=r[9]; const cron=(cronRaw!==''&&cronRaw!=null&&String(cronRaw).trim()!=='')?n(cronRaw):null;
-    const match=s(r[10]);
-    // Profile cols: rimangono uguali ma con indici aggiornati
-    // Assumendo che i dati dei profili iniziano dove prima (dopo le colonne nuove aggiunte)
-    // Per ora usiamo conc come pilota principale
-    const pilota=conc;
-    if(!conc||!mappa) continue;
+    const pilota=s(r[0]); if(!pilota) continue;
+    const pos=n(r[1]);
+    const mappa=s(r[2]);
+    const anno=s(r[3]);
+    const elo=fl(r[4]);
+    const difficolta=s(r[5]);
+    const torneo=s(r[6]);
+    const tipo_match=s(r[7]); // LOCALE o LAN
+    const match_id=s(r[8]); // Codice univoco match
+    const cron=r[9]!==''&&r[9]!=null&&String(r[9]).trim()!==''?n(r[9]):null;
+    const nome_match=s(r[10]);
+    // Profile: rimangono nelle stesse colonne
+    const personaggio=s(r[11])||'';
+    const veicolo=s(r[12])||'';
+    const mappa1=s(r[13])||'';
+    const mappa2=s(r[14])||'';
+    const derapata=s(r[15])||'';
+    const foto_profilo=s(r[16])||'';
+    
+    if(!mappa||!match_id) continue;
+    
+    // Aggregate this player's data into the match
+    if(!matchData[match_id]){
+      matchData[match_id]={players:{},mappa,anno,torneo,cron,nome_match,tipo_match,diff:difficolta};
+    }
+    matchData[match_id].players[pilota]=pos;
+    
+    // ELO timeline
     if(cron!=null&&elo>0){
-      if(!eloTL[conc])eloTL[conc]={};
-      if(!eloTL[conc][cron])eloTL[conc][cron]={elo,match,torneo:tornN,anno};
+      if(!eloTL[pilota])eloTL[pilota]={};
+      if(!eloTL[pilota][cron])eloTL[pilota][cron]={elo,match:nome_match,torneo,anno};
     }
-    if(cron!=null&&match) cronLabels[cron]=match;
-    // torneoStats per player
-    if(tornN){
-      if(!torneoStatsMap[conc]) torneoStatsMap[conc]={};
-      if(!torneoStatsMap[conc][tornN]) torneoStatsMap[conc][tornN]={gare:0,wins:0,posSum:0};
+    
+    // Cron labels
+    if(cron!=null&&nome_match) cronLabels[cron]=nome_match;
+    
+    // Map info
+    if(mappa&&!bad.has(mappa)&&!mapInfo[mappa]) mapInfo[mappa]={trofeo:'ALTRO',foto:''};
+    
+    // Player profile (first occurrence)
+    if(!playerProfiles[pilota]) playerProfiles[pilota]={personaggio,veicolo,mappa1,mappa2,derapata,foto_profilo};
+    else if(foto_profilo&&!playerProfiles[pilota].foto_profilo) playerProfiles[pilota].foto_profilo=foto_profilo;
+    
+    // Torneo stats
+    if(torneo){
+      if(!torneoStatsMap[pilota]) torneoStatsMap[pilota]={};
+      if(!torneoStatsMap[pilota][torneo]) torneoStatsMap[pilota][torneo]={gare:0,wins:0,posSum:0};
     }
-    // Build race — key uses sorted players+positions to deduplicate robustly
-    const players={[conc]:posC};
-    const playersKey=Object.entries(players).sort((a,b)=>a[0]<b[0]?-1:1).map(([n,p])=>n+':'+p).join('|');
-    const key=[tornN,anno,mappa,playersKey].join('||');
-    if(!racesDict[key]) racesDict[key]={mappa,anno,partita,diff,torneo:tornN,cron,nome_match:match,tipo_match:tipoMatch,match_id:matchId,players:{}};
-    for(const[pn,pp]of Object.entries(players)) if(!(pn in racesDict[key].players)) racesDict[key].players[pn]=pp;
+  }
+  
+  // Convert matchData to races
+  for(const[mid, data] of Object.entries(matchData)){
+    const playersKey=Object.entries(data.players).sort((a,b)=>a[0]<b[0]?-1:1).map(([n,p])=>n+':'+p).join('|');
+    const key=[data.torneo,data.anno,data.mappa,playersKey].join('||');
+    if(!racesDict[key]){
+      racesDict[key]={
+        mappa:data.mappa,
+        anno:data.anno,
+        partita:0,
+        diff:data.diff,
+        torneo:data.torneo,
+        cron:data.cron,
+        nome_match:data.nome_match,
+        tipo_match:data.tipo_match,
+        match_id:mid,
+        players:{}
+      };
+    }
+    Object.assign(racesDict[key].players, data.players);
   }
   const races=Object.values(racesDict);
   const pstats={};

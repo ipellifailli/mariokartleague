@@ -625,14 +625,15 @@ function parseRows(rows){
     
     // Aggregate this player's data into the match
     if(!matchData[match_id]){
-      matchData[match_id]={players:{},mappa,anno,torneo,cron,nome_match,tipo_match,diff:difficolta};
+      matchData[match_id]={players:{},playerElo:{},mappa,anno,torneo,cron,nome_match,tipo_match,diff:difficolta};
     }
     matchData[match_id].players[pilota]=pos;
+    matchData[match_id].playerElo[pilota]=elo;
     
-    // ELO timeline
+    // ELO timeline (globale, non filtrato per tipo match)
     if(cron!=null&&elo>0){
       if(!eloTL[pilota])eloTL[pilota]={};
-      if(!eloTL[pilota][cron])eloTL[pilota][cron]={elo,match:nome_match,torneo,anno};
+      if(!eloTL[pilota][cron])eloTL[pilota][cron]={elo,match:nome_match,torneo,anno,tipo_match};
     }
     
     // Cron labels
@@ -667,10 +668,12 @@ function parseRows(rows){
         nome_match:data.nome_match,
         tipo_match:data.tipo_match,
         match_id:mid,
-        players:{}
+        players:{},
+        playerElo:{}
       };
     }
     Object.assign(racesDict[key].players, data.players);
+    Object.assign(racesDict[key].playerElo, data.playerElo);
   }
   const races=Object.values(racesDict);
   const pstats={};
@@ -1085,9 +1088,11 @@ function getBestElo(player, mode){
 }
 
 // Best official ranking position ever: {pos, total} or null
-function getBestRank(playerName){
+// statsMap: mappa {playerName: {eloTimeline}} da usare (default PLAYERS = globale)
+function getBestRank(playerName, statsMap){
+  const src=statsMap||PLAYERS;
   const torneoElo={};
-  for(const[pn,pl] of Object.entries(PLAYERS)){
+  for(const[pn,pl] of Object.entries(src)){
     for(const pt of (pl.eloTimeline||[])){
       const t=pt.torneo||'__none__';
       if(!torneoElo[t])torneoElo[t]={};
@@ -1110,16 +1115,18 @@ function getBestRank(playerName){
   return bestPos===null?null:{pos:bestPos,total:bestTotal};
 }
 
-// Rank deltas — always based on global ELO order, never affected by current sort
-function getRankDeltas(){
-  const sorted=Object.values(PLAYERS).filter(x=>x.lastRk).sort((a,b)=>b.lastRk-a.lastRk);
+// Rank deltas — basato sull'ordine ELO più recente vs il torneo precedente
+// statsMap: mappa {playerName: {lastRk, eloTimeline}} da usare (default PLAYERS = globale)
+function getRankDeltas(statsMap){
+  const src=statsMap||PLAYERS;
+  const sorted=Object.values(src).filter(x=>x.lastRk).sort((a,b)=>b.lastRk-a.lastRk);
   let lastTorneo=null,maxCron=-Infinity;
-  for(const p of Object.values(PLAYERS))
+  for(const p of Object.values(src))
     for(const pt of (p.eloTimeline||[]))
       if(pt.cron>maxCron&&pt.torneo){maxCron=pt.cron;lastTorneo=pt.torneo;}
   if(!lastTorneo) return {};
   const preElo={};
-  for(const p of Object.values(PLAYERS)){
+  for(const p of Object.values(src)){
     const tl=(p.eloTimeline||[]).filter(pt=>pt.torneo!==lastTorneo);
     if(tl.length) preElo[p.name]=tl[tl.length-1].elo;
   }
@@ -1147,18 +1154,32 @@ function thSort(f){
   document.getElementById('sort-sel').value=f;
   renderClass();
 }
+function buildFilteredPlayerStats(racesArr){
+  const pf={};
+  for(const race of racesArr){
+    for(const[pn,pp]of Object.entries(race.players)){
+      if(!pf[pn])pf[pn]={name:pn,gare:0,wins:0,posSum:0,eloTimeline:[]};
+      pf[pn].gare++;pf[pn].posSum+=pp;if(pp===1)pf[pn].wins++;
+      const eloVal=race.playerElo?race.playerElo[pn]:null;
+      if(race.cron!=null&&eloVal>0){
+        pf[pn].eloTimeline.push({cron:race.cron,elo:eloVal,torneo:race.torneo,anno:race.anno,match:race.nome_match});
+      }
+    }
+  }
+  for(const p of Object.values(pf)){
+    p.avgPos=p.gare>0?p.posSum/p.gare:0;
+    p.winPct=p.gare>0?p.wins/p.gare:0;
+    p.eloTimeline.sort((a,b)=>a.cron-b.cron);
+    // lastRk = l'ULTIMO valore ELO cronologico all'interno del subset filtrato
+    p.lastRk=p.eloTimeline.length?p.eloTimeline[p.eloTimeline.length-1].elo:1000;
+  }
+  return pf;
+}
 function getFilteredStats(){
   const aF=document.getElementById('anno-sel').value,tF=document.getElementById('torn-sel').value;
-  const allRaces=getFilteredRaces();
-  if(!aF&&!tF)return PLAYERS;
+  const allRaces=getFilteredRaces(); // già rispetta il filtro tipo match della sezione attiva
   const fr=allRaces.filter(r=>(!aF||r.anno==aF)&&(!tF||r.torneo===tF));
-  const pf={};
-  for(const race of fr){for(const[pn,pp]of Object.entries(race.players)){
-    if(!pf[pn])pf[pn]={name:pn,gare:0,wins:0,posSum:0,lastRk:PLAYERS[pn]?.lastRk||1000};
-    pf[pn].gare++;pf[pn].posSum+=pp;if(pp===1)pf[pn].wins++;
-  }}
-  for(const s of Object.values(pf)){s.avgPos=s.gare>0?s.posSum/s.gare:0;s.winPct=s.gare>0?s.wins/s.gare:0;}
-  return pf;
+  return buildFilteredPlayerStats(fr);
 }
 function renderClass(){
   const f=document.getElementById('sort-sel').value,mg=parseInt(document.getElementById('ming-sel').value)||0;
@@ -1169,8 +1190,8 @@ function renderClass(){
   });
   const pm=getFilteredStats();
   let pl=Object.values(pm).filter(p=>p.gare>=mg);
-  // Deltas computed once from global ELO order — not affected by sort
-  const deltas=getRankDeltas();
+  // Deltas e best-rank calcolati sul set FILTRATO (rispetta anno/torneo/tipo match della sezione)
+  const deltas=getRankDeltas(pm);
   pl.sort((a,b)=>{
     let va,vb;
     if(f==='rk'){va=a.lastRk;vb=b.lastRk;}
@@ -1184,10 +1205,10 @@ function renderClass(){
       if(va===null) return 1; if(vb===null) return -1;
       return (va-vb)*sortDir;
     } else if(f==='bestelo'){
-      va=getBestElo(PLAYERS[a.name]||a,beloMode)??-Infinity;
-      vb=getBestElo(PLAYERS[b.name]||b,beloMode)??-Infinity;
+      va=getBestElo(a,beloMode)??-Infinity;
+      vb=getBestElo(b,beloMode)??-Infinity;
     } else if(f==='bestrank'){
-      const ra=getBestRank(a.name),rb=getBestRank(b.name);
+      const ra=getBestRank(a.name,pm),rb=getBestRank(b.name,pm);
       va=ra?ra.pos:9999; vb=rb?rb.pos:9999;
     } else{va=a.lastRk;vb=b.lastRk;}
     return (va-vb)*sortDir;
@@ -1196,11 +1217,10 @@ function renderClass(){
   pl.forEach((p,i)=>{
     const pct=Math.round((p.winPct||0)*100),rc=i===0?'r1':i===1?'r2':i===2?'r3':'';
     const elo=Math.round(p.lastRk||1000),ec=elo>=1200?'bg':elo>=1050?'by':elo>=950?'bm':'br';
-    const fullP=PLAYERS[p.name]||p;
-    const bestElo=getBestElo(fullP,beloMode);
+    const bestElo=getBestElo(p,beloMode);
     const bestEloHtml=bestElo!==null?`<span class="badge by" style="font-size:.8rem;padding:.12rem .55rem">${Math.round(bestElo)}</span>`:'<span style="color:var(--muted)">—</span>';
     const deltaD=deltas[p.name]||{};
-    const br=getBestRank(p.name);
+    const br=getBestRank(p.name,pm);
     const brHtml=br?`<span style="font-family:'Orbitron',monospace;font-size:.75rem;font-weight:700;color:var(--yellow)">${br.pos}</span><span style="color:var(--muted);font-size:.7rem"> / ${br.total}</span>`:'<span style="color:var(--muted)">—</span>';
     tb.innerHTML+=`<tr>
       <td><span class="rn ${rc}">${i+1}</span></td>

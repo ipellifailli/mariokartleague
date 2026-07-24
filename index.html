@@ -550,7 +550,7 @@ th:nth-child(2){text-align:left;}
 // ============================================================
 // STATE
 // ============================================================
-let RACES=[], PLAYERS={}, TORNEO_LINKS={}, MAP_STATS=[], TROPHY_INFO={}, CRON_LABELS={}, TIMELINE_FRAMES=[];
+let RACES=[], PLAYERS={}, TORNEO_LINKS={}, TORNEO_LAST_ROW={}, MAP_STATS=[], TROPHY_INFO={}, CRON_LABELS={}, TIMELINE_FRAMES=[];
 let PLAYER_PROFILES={}, CHAR_IMGS={}, VEHICLE_IMGS={};
 let sortField='rk', sortDir=-1;
 let rkFrame=0, rkPlaying=false, rkTimer=null;
@@ -591,6 +591,7 @@ async function fetchAndLoad(){
 function parseRows(rows){
   const racesDict={},torneo_links={},eloTL={},cronLabels={},mapInfo={},trophyInfo={},playerProfiles={},torneoStatsMap={};
   const bad=new Set(['','MAPPA 1','MAPPA 2','MAPPA 3','MAPPA 4','MAPPA 5','MAPPA 6']);
+  const torneoLastRow={}; // torneo -> ultimo indice di riga in cui appare (per ordinamento cartelle)
   
   // Funzioni helper
   const s=v=>{const x=String(v==null?'':v).trim().replace(/\s+/g,' ');return(x===''||x==='N/D'||x==='#VALUE!')?'':x;};
@@ -602,26 +603,59 @@ function parseRows(rows){
   
   for(let i=1;i<rows.length;i++){
     const r=rows[i];
-    const pilota=s(r[0]); if(!pilota) continue;
-    const pos=n(r[1]);
-    const mappa=s(r[2]);
-    const anno=s(r[3]);
-    const elo=fl(r[4]);
-    const difficolta=s(r[5]);
-    const torneo=s(r[6]);
-    const tipo_match=s(r[7]); // LOCALE o LAN
-    const match_id=s(r[8]); // Codice univoco match
-    const cron=r[9]!==''&&r[9]!=null&&String(r[9]).trim()!==''?n(r[9]):null;
-    const nome_match=s(r[10]);
-    // Profile: rimangono nelle stesse colonne
-    const personaggio=s(r[11])||'';
-    const veicolo=s(r[12])||'';
-    const mappa1=s(r[13])||'';
-    const mappa2=s(r[14])||'';
-    const derapata=s(r[15])||'';
-    const foto_profilo=s(r[16])||'';
+    const pilota=s(r[0]); // A
+    const pos=n(r[1]); // B
+    const mappa=s(r[2]); // C
+    const anno=s(r[3]); // D
+    const elo=fl(r[4]); // E
+    const difficolta=s(r[5]); // F
+    const torneo=s(r[6]); // G
+    const tipo_match=s(r[7]); // H - LOCALE o LAN
+    const match_id=s(r[8]); // I - Codice univoco match
+    const cron=r[9]!==''&&r[9]!=null&&String(r[9]).trim()!==''?n(r[9]):null; // J
+    const nome_match=s(r[10]); // K
+    // L (11) non usata
+    const torneoLinkName=s(r[12]); // M - nome torneo (tabella link)
+    const torneoLink=s(r[13]); // N - link torneo
+    const torneoLinkAnno=s(r[14]); // O - anno torneo (tabella link)
+    // P (15) non usata
+    const mappaTrofeoName=s(r[16]); // Q - nome mappa (tabella trofei)
+    const mappaTrofeo=s(r[17]); // R - trofeo corrispondente
+    // S (18) non usata
+    const profPilota=s(r[19]); // T - pilota (tabella profili)
+    const personaggio=s(r[20]); // U
+    const veicolo=s(r[21]); // V
+    const mappa1=s(r[22]); // W
+    const mappa2=s(r[23]); // X
+    const derapata=s(r[24]); // Y
+    const foto_profilo=s(r[25]); // Z
     
-    if(!mappa||!match_id) continue;
+    // --- Tabella link tornei (M,N,O) ---
+    if(torneoLinkName){
+      torneo_links[torneoLinkName]={link:torneoLink||null, anno:torneoLinkAnno||null};
+    }
+    
+    // --- Tabella mappa/trofeo (Q,R) ---
+    if(mappaTrofeoName&&!bad.has(mappaTrofeoName)){
+      mapInfo[mappaTrofeoName]={trofeo:mappaTrofeo||'ALTRO',foto:''};
+    }
+    
+    // --- Tabella profilo giocatore (T-Z) ---
+    if(profPilota){
+      if(!playerProfiles[profPilota]) playerProfiles[profPilota]={personaggio,veicolo,mappa1,mappa2,derapata,foto_profilo};
+      else{
+        const pp=playerProfiles[profPilota];
+        if(personaggio&&!pp.personaggio)pp.personaggio=personaggio;
+        if(veicolo&&!pp.veicolo)pp.veicolo=veicolo;
+        if(mappa1&&!pp.mappa1)pp.mappa1=mappa1;
+        if(mappa2&&!pp.mappa2)pp.mappa2=mappa2;
+        if(derapata&&!pp.derapata)pp.derapata=derapata;
+        if(foto_profilo&&!pp.foto_profilo)pp.foto_profilo=foto_profilo;
+      }
+    }
+    
+    // --- Dati match (riga per pilota) ---
+    if(!pilota||!mappa||!match_id) continue;
     
     // Aggregate this player's data into the match
     if(!matchData[match_id]){
@@ -639,12 +673,8 @@ function parseRows(rows){
     // Cron labels
     if(cron!=null&&nome_match) cronLabels[cron]=nome_match;
     
-    // Map info
-    if(mappa&&!bad.has(mappa)&&!mapInfo[mappa]) mapInfo[mappa]={trofeo:'ALTRO',foto:''};
-    
-    // Player profile (first occurrence)
-    if(!playerProfiles[pilota]) playerProfiles[pilota]={personaggio,veicolo,mappa1,mappa2,derapata,foto_profilo};
-    else if(foto_profilo&&!playerProfiles[pilota].foto_profilo) playerProfiles[pilota].foto_profilo=foto_profilo;
+    // Traccia l'ultima riga in cui appare ogni torneo (per ordinamento cartelle)
+    if(torneo) torneoLastRow[torneo]=i;
     
     // Torneo stats
     if(torneo){
@@ -719,7 +749,7 @@ function parseRows(rows){
     return{cron,label:cronLabels[cron],anno:annoC,torneo:torneoC,elo:{...curElo}};
   });
   return{races,players,torneo_links,map_stats:Object.values(mapStatsD),trophy_info:trophyInfo,
-    cron_labels:cronLabels,timeline_frames,player_profiles:playerProfiles};
+    cron_labels:cronLabels,timeline_frames,player_profiles:playerProfiles,torneo_last_row:torneoLastRow};
 }
 
 function loadFromData(data){
@@ -732,6 +762,7 @@ function loadFromData(data){
     PLAYERS[p.name]=p;
   }
   TORNEO_LINKS=data.torneo_links||{};
+  TORNEO_LAST_ROW=data.torneo_last_row||{};
   MAP_STATS=data.map_stats||[];
   TROPHY_INFO=data.trophy_info||{};
   CRON_LABELS=data.cron_labels||{};
@@ -1077,10 +1108,11 @@ function getBestElo(player, mode){
   const tl=player.eloTimeline||[];
   if(!tl.length) return null;
   if(mode==='all') return Math.max(...tl.map(p=>p.elo));
-  // Official: last entry per torneo
+  // Ufficiale: ultimo valore registrato per ciascun torneo (raggruppato per torneo+anno,
+  // per evitare che tornei con lo stesso nome in anni diversi vengano uniti)
   const byTorneo={};
   for(const pt of tl){
-    const t=pt.torneo||'__none__';
+    const t=(pt.torneo||'__none__')+'||'+(pt.anno||'');
     if(!byTorneo[t]||pt.cron>byTorneo[t].cron) byTorneo[t]={cron:pt.cron,elo:pt.elo};
   }
   const officialVals=Object.values(byTorneo).map(v=>v.elo);
@@ -1094,13 +1126,13 @@ function getBestRank(playerName, statsMap){
   const torneoElo={};
   for(const[pn,pl] of Object.entries(src)){
     for(const pt of (pl.eloTimeline||[])){
-      const t=pt.torneo||'__none__';
+      const t=(pt.torneo||'__none__')+'||'+(pt.anno||'');
       if(!torneoElo[t])torneoElo[t]={};
       if(!torneoElo[t][pn]||pt.cron>torneoElo[t][pn].cron) torneoElo[t][pn]={elo:pt.elo,cron:pt.cron};
     }
   }
   const order=Object.entries(torneoElo)
-    .filter(([t])=>t!=='__none__')
+    .filter(([t])=>!t.startsWith('__none__||'))
     .map(([t,m])=>({t,maxCron:Math.max(...Object.values(m).map(v=>v.cron))}))
     .sort((a,b)=>a.maxCron-b.maxCron);
   let cum={},bestPos=null,bestTotal=null;
@@ -2532,7 +2564,10 @@ function renderTornei(){
   if(byAnno['—']) anniSorted.push('—');
 
   anniSorted.forEach((anno,idx)=>{
-    const tornei=byAnno[anno];
+    const tornei=[...byAnno[anno]].sort((a,b)=>{
+      const ra=TORNEO_LAST_ROW[a.tname]??-1, rb=TORNEO_LAST_ROW[b.tname]??-1;
+      return rb-ra; // ultima apparizione nel foglio più in alto
+    });
     const id='yr-'+anno;
     const isOpen=idx===0; // most recent year open by default
 
